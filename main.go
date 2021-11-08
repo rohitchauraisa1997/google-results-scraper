@@ -1,16 +1,36 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"html/template"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/gorilla/mux"
 	domained "github.com/rohitchauraisa1997/google-results-scraper/domains"
 )
+
+type FormInput struct {
+	searchTerm   string
+	countryCode  string
+	languageCode string
+	pages        string
+	count        string
+	backoff      string
+}
+
+type Input struct {
+	SearchTerm   string `json:"search_term"`
+	CountryCode  string `json:"country_code"`
+	LanguageCode string `json:"language_code"`
+}
 
 type SearchResult struct {
 	ResultRank  int
@@ -144,11 +164,70 @@ func scrapeClientRequest(searchURL string, proxyString interface{}) (*http.Respo
 	return res, nil
 }
 
-func main() {
-	res, err := GoogleScrape("ronaldo", "in", "en", nil, 1, 30, 10)
+func jsonResponse(w http.ResponseWriter, r *http.Request) {
+	var input Input
+	// _ = json.NewDecoder(r.Body).Decode(&input)
+	_ = json.NewDecoder(r.Body).Decode(&input)
+	searchTerm := input.SearchTerm
+	countryCode := input.CountryCode
+	languageCode := input.LanguageCode
+	log.Printf("Getting info for searchTerm = %s countryCode = %s languageCode = %s", searchTerm, countryCode, languageCode)
+	// res, err := GoogleScrape("ronaldo", "in", "en", nil, 1, 30, 10)
+	res, err := GoogleScrape(searchTerm, countryCode, languageCode, nil, 1, 10, 10)
 	if err == nil {
 		for _, res := range res {
 			fmt.Println(res)
 		}
 	}
+	// res := make(map[string]interface{})
+	json.NewEncoder(w).Encode(res)
+
+}
+
+func formResponse(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.ParseFiles("input.html"))
+	if r.Method != http.MethodPost {
+		tmpl.Execute(w, nil)
+		fmt.Println("returning")
+		return
+	}
+
+	details := FormInput{
+		searchTerm:   r.FormValue("Search Term"),
+		countryCode:  r.FormValue("Country Code"),
+		languageCode: r.FormValue("Language Code"),
+		pages:        r.FormValue("Pages"),
+		count:        r.FormValue("Count"),
+		backoff:      r.FormValue("Backoff"),
+	}
+	fmt.Println(details)
+	fmt.Println(details.searchTerm)
+	fmt.Println(details.countryCode)
+	fmt.Println(details.languageCode)
+
+	pages, _ := strconv.Atoi(details.pages)
+	count, _ := strconv.Atoi(details.count)
+	backoff, _ := strconv.Atoi(details.backoff)
+
+	res, err := GoogleScrape(details.searchTerm, details.countryCode, details.languageCode, nil, pages, count, backoff)
+	if err == nil {
+		for _, res := range res {
+			fmt.Println(res)
+		}
+	}
+	responseTmpl := template.Must(template.ParseFiles("response.html"))
+	if r.Method != http.MethodPost {
+		responseTmpl.Execute(w, nil)
+		fmt.Println("returning")
+		return
+	}
+	responseTmpl.Execute(w, res)
+}
+
+func main() {
+	r := mux.NewRouter()
+	r.HandleFunc("/", jsonResponse).Methods("POST")
+	// r.HandleFunc("/form", formResponse).Methods("POST")
+	http.HandleFunc("/form", formResponse)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
